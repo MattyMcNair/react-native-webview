@@ -2,6 +2,7 @@ package com.reactnativecommunity.webview;
 
 import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
+import android.app.Dialog;
 import android.app.DownloadManager;
 import android.content.Context;
 import android.content.Intent;
@@ -13,6 +14,7 @@ import android.os.Environment;
 import android.support.annotation.RequiresApi;
 import android.text.TextUtils;
 import android.view.Gravity;
+import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewGroup.LayoutParams;
@@ -21,6 +23,7 @@ import android.webkit.ConsoleMessage;
 import android.webkit.CookieManager;
 import android.webkit.DownloadListener;
 import android.webkit.GeolocationPermissions;
+import android.webkit.HttpAuthHandler;
 import android.webkit.JavascriptInterface;
 import android.webkit.URLUtil;
 import android.webkit.ValueCallback;
@@ -29,6 +32,8 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.Button;
+import android.widget.EditText;
 import android.widget.FrameLayout;
 
 import com.facebook.react.views.scroll.ScrollEvent;
@@ -435,6 +440,11 @@ public class RNCWebViewManager extends SimpleViewManager<WebView> {
     view.getSettings().setGeolocationEnabled(isGeolocationEnabled != null && isGeolocationEnabled);
   }
 
+  @ReactProp(name = "onScroll")
+  public void setOnScroll(WebView view, boolean hasScrollEvent) {
+    ((RNCWebView) view).setHasScrollEvent(hasScrollEvent);
+  }
+
   @Override
   protected void addEventEmitters(ThemedReactContext reactContext, WebView view) {
     // Do not register default touch emitter and let WebView implementation handle touches
@@ -449,7 +459,7 @@ public class RNCWebViewManager extends SimpleViewManager<WebView> {
     }
     export.put(TopLoadingProgressEvent.EVENT_NAME, MapBuilder.of("registrationName", "onLoadingProgress"));
     export.put(TopShouldStartLoadWithRequestEvent.EVENT_NAME, MapBuilder.of("registrationName", "onShouldStartLoadWithRequest"));
-    export.put(ScrollEventType.SCROLL.getJSEventName(), MapBuilder.of("registrationName", "onScroll"));
+    export.put(ScrollEventType.getJSEventName(ScrollEventType.SCROLL), MapBuilder.of("registrationName", "onScroll"));
     return export;
   }
 
@@ -633,6 +643,37 @@ public class RNCWebViewManager extends SimpleViewManager<WebView> {
     }
 
     @Override
+    public void onReceivedHttpAuthRequest(WebView view, HttpAuthHandler handler, String host, String realm) {
+      Dialog dialog = new Dialog(view.getContext());
+      EditText usernameEditText;
+      EditText passwordEditText;
+      Button authenticateButton;
+      Button cancelButton;
+
+      dialog.setContentView(R.layout.username_password_dialog_input);
+      usernameEditText = dialog.findViewById(R.id.username_password_dialog_username_input);
+      passwordEditText = dialog.findViewById(R.id.username_password_dialog_password_input);
+      authenticateButton = dialog.findViewById(R.id.username_password_dialog_authenticate_button);
+      cancelButton = dialog.findViewById(R.id.username_password_dialog_cancel_button);
+
+      authenticateButton.setOnClickListener(new View.OnClickListener() {
+        @Override
+        public void onClick(View view) {
+          handler.proceed(usernameEditText.getText().toString(), passwordEditText.getText().toString());
+          dialog.dismiss();
+        }
+      });
+      cancelButton.setOnClickListener(new View.OnClickListener() {
+        @Override
+        public void onClick(View view) {
+          dialog.dismiss();
+        }
+      });
+
+      dialog.show();
+    }
+
+    @Override
     public void onReceivedError(
       WebView webView,
       int errorCode,
@@ -784,7 +825,8 @@ public class RNCWebViewManager extends SimpleViewManager<WebView> {
     protected @Nullable
     RNCWebViewClient mRNCWebViewClient;
     protected boolean sendContentSizeChangeEvents = false;
-    private final OnScrollDispatchHelper mOnScrollDispatchHelper = new OnScrollDispatchHelper();
+    private OnScrollDispatchHelper mOnScrollDispatchHelper;
+    protected boolean hasScrollEvent = false;
 
     /**
      * WebView must be created with an context of the current activity
@@ -798,6 +840,10 @@ public class RNCWebViewManager extends SimpleViewManager<WebView> {
 
     public void setSendContentSizeChangeEvents(boolean sendContentSizeChangeEvents) {
       this.sendContentSizeChangeEvents = sendContentSizeChangeEvents;
+    }
+
+    public void setHasScrollEvent(boolean hasScrollEvent) {
+      this.hasScrollEvent = hasScrollEvent;
     }
 
     @Override
@@ -893,6 +939,14 @@ public class RNCWebViewManager extends SimpleViewManager<WebView> {
 
     protected void onScrollChanged(int x, int y, int oldX, int oldY) {
       super.onScrollChanged(x, y, oldX, oldY);
+
+      if (!hasScrollEvent) {
+        return;
+      }
+
+      if (mOnScrollDispatchHelper == null) {
+        mOnScrollDispatchHelper = new OnScrollDispatchHelper();
+      }
 
       if (mOnScrollDispatchHelper.onScrollChanged(x, y)) {
         ScrollEvent event = ScrollEvent.obtain(

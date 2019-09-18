@@ -36,6 +36,9 @@ static NSURLCredential* clientAuthenticationCredential;
 @property (nonatomic, copy) RCTDirectEventBlock onMessage;
 @property (nonatomic, copy) RCTDirectEventBlock onScroll;
 @property (nonatomic, copy) WKWebView *webView;
+@property UITextField *ntlAuthenticationUsernameTextField;
+@property UITextField *ntlAuthenticationPasswordTextField;
+
 @end
 
 @implementation RNCWKWebView
@@ -141,6 +144,10 @@ static NSURLCredential* clientAuthenticationCredential;
 #else
     wkWebViewConfig.mediaPlaybackRequiresUserAction = _mediaPlaybackRequiresUserAction;
 #endif
+
+    if (_applicationNameForUserAgent) {
+        wkWebViewConfig.applicationNameForUserAgent = [NSString stringWithFormat:@"%@ %@", wkWebViewConfig.applicationNameForUserAgent, _applicationNameForUserAgent];
+    }
 
     if(_sharedCookiesEnabled) {
       // More info to sending cookies with WKWebView
@@ -570,6 +577,7 @@ static NSURLCredential* clientAuthenticationCredential;
 
   // Ensure webview takes the position and dimensions of RNCWKWebView
   _webView.frame = self.bounds;
+  _webView.scrollView.contentInset = _contentInset;
 }
 
 - (NSMutableDictionary<NSString *, id> *)baseEvent
@@ -592,6 +600,11 @@ static NSURLCredential* clientAuthenticationCredential;
   didReceiveAuthenticationChallenge:(NSURLAuthenticationChallenge *)challenge
                   completionHandler:(void (^)(NSURLSessionAuthChallengeDisposition disposition, NSURLCredential * _Nullable))completionHandler
 {
+  if ([[challenge protectionSpace] authenticationMethod] == NSURLAuthenticationMethodNTLM && [challenge previousFailureCount] == 0) {
+    [self handleNTLAuthenticationChallenge:completionHandler];
+    return;
+  }
+  
   if (!clientAuthenticationCredential) {
     completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, nil);
     return;
@@ -602,6 +615,32 @@ static NSURLCredential* clientAuthenticationCredential;
     completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, nil);
   }
 }
+
+
+- (void)handleNTLAuthenticationChallenge:(void (^)(NSURLSessionAuthChallengeDisposition disposition, NSURLCredential * _Nullable))completionHandler {
+  UIAlertController *authenticationAlert = [UIAlertController alertControllerWithTitle:@"Authenticaiton" message:@"" preferredStyle:UIAlertControllerStyleAlert];
+  
+  [authenticationAlert addTextFieldWithConfigurationHandler:^(UITextField * _Nonnull textField) {
+    textField.placeholder = @"Username";
+    self.ntlAuthenticationUsernameTextField = textField;
+  }];
+  [authenticationAlert addTextFieldWithConfigurationHandler:^(UITextField * _Nonnull textField) {
+    textField.placeholder = @"Password";
+    textField.secureTextEntry = YES;
+    self.ntlAuthenticationPasswordTextField = textField;
+  }];
+  [authenticationAlert addAction:[UIAlertAction actionWithTitle:@"Authenticate" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
+    if (self.ntlAuthenticationUsernameTextField.text != nil && self.ntlAuthenticationPasswordTextField.text != nil) {
+      completionHandler(NSURLSessionAuthChallengeUseCredential, [NSURLCredential credentialWithUser:self.ntlAuthenticationUsernameTextField.text password:self.ntlAuthenticationPasswordTextField.text persistence:NSURLCredentialPersistenceForSession]);
+    }
+  }]];
+  [authenticationAlert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:^(UIAlertAction * _Nonnull action) {
+    completionHandler(NSURLSessionAuthChallengeRejectProtectionSpace, nil);
+  }]];
+  
+  [[self topViewController] presentViewController:authenticationAlert animated:YES completion:nil];
+}
+
 
 #pragma mark - WKNavigationDelegate methods
 
@@ -716,6 +755,7 @@ static NSURLCredential* clientAuthenticationCredential;
     NSMutableDictionary<NSString *, id> *event = [self baseEvent];
     [event addEntriesFromDictionary: @{
       @"url": (request.URL).absoluteString,
+      @"mainDocumentURL": (request.mainDocumentURL).absoluteString,
       @"navigationType": navigationTypes[@(navigationType)]
     }];
     if (![self.delegate webView:self
