@@ -2,8 +2,10 @@ package com.reactnativecommunity.webview;
 
 import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
+import android.app.Dialog;
 import android.app.DownloadManager;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
@@ -14,6 +16,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
 import androidx.annotation.RequiresApi;
+import androidx.appcompat.app.AlertDialog;
 import androidx.core.content.ContextCompat;
 import android.text.TextUtils;
 import android.view.Gravity;
@@ -25,6 +28,7 @@ import android.webkit.ConsoleMessage;
 import android.webkit.CookieManager;
 import android.webkit.DownloadListener;
 import android.webkit.GeolocationPermissions;
+import android.webkit.HttpAuthHandler;
 import android.webkit.JavascriptInterface;
 import android.webkit.PermissionRequest;
 import android.webkit.URLUtil;
@@ -35,6 +39,8 @@ import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.Button;
+import android.widget.EditText;
 import android.widget.FrameLayout;
 
 import com.facebook.react.views.scroll.ScrollEvent;
@@ -691,6 +697,7 @@ public class RNCWebViewManager extends SimpleViewManager<WebView> {
     protected boolean mLastLoadFailed = false;
     protected @Nullable
     ReadableArray mUrlPrefixesForDefaultIntent;
+    private static int attemptCount = 0;
 
     @Override
     public void onPageFinished(WebView webView, String url) {
@@ -728,6 +735,57 @@ public class RNCWebViewManager extends SimpleViewManager<WebView> {
       return true;
     }
 
+    @Override
+    public void onReceivedHttpAuthRequest(WebView view, HttpAuthHandler handler, String host, String realm) {
+      Dialog dialog;
+      EditText usernameEditText;
+      EditText passwordEditText;
+      Button authenticateButton;
+      Button cancelButton;
+
+      if (RNCWebViewClient.attemptCount >= 3) {
+        new AlertDialog.Builder(view.getContext())
+          .setTitle("Authentication Failed")
+          .setMessage("You have exceeded the maximum authentication attempts.")
+          .setPositiveButton(android.R.string.yes, new DialogInterface.OnClickListener() {
+            public void onClick(DialogInterface dialog, int which) {
+              RNCWebViewClient.attemptCount = 0;
+            }
+          })
+          .show();
+        handler.cancel();
+        view.loadDataWithBaseURL("", "<h1>Authentication Failed</h1>", HTML_MIME_TYPE, HTML_ENCODING, null);
+        return;
+      }
+
+      dialog = new Dialog(view.getContext());
+
+      RNCWebViewClient.attemptCount = RNCWebViewClient.attemptCount + 1;
+      dialog.setContentView(R.layout.username_password_dialog_input);
+      usernameEditText = dialog.findViewById(R.id.username_password_dialog_username_input);
+      passwordEditText = dialog.findViewById(R.id.username_password_dialog_password_input);
+      authenticateButton = dialog.findViewById(R.id.username_password_dialog_authenticate_button);
+      cancelButton = dialog.findViewById(R.id.username_password_dialog_cancel_button);
+
+      authenticateButton.setOnClickListener(new View.OnClickListener() {
+        @Override
+        public void onClick(View view) {
+          handler.proceed(usernameEditText.getText().toString(), passwordEditText.getText().toString());
+          dialog.dismiss();
+        }
+      });
+      cancelButton.setOnClickListener(new View.OnClickListener() {
+        @Override
+        public void onClick(View button) {
+          RNCWebViewClient.attemptCount = 0;
+          view.loadDataWithBaseURL("", "<h1>Authentication Canceled</h1>", HTML_MIME_TYPE, HTML_ENCODING, null);
+          handler.cancel();
+          dialog.dismiss();
+        }
+      });
+
+      dialog.show();
+    }
 
     @TargetApi(Build.VERSION_CODES.N)
     @Override

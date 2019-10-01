@@ -50,6 +50,8 @@ static NSDictionary* customCertificatesForHost;
 @property (nonatomic, copy) RCTDirectEventBlock onScroll;
 @property (nonatomic, copy) RCTDirectEventBlock onContentProcessDidTerminate;
 @property (nonatomic, copy) WKWebView *webView;
+@property UITextField *ntlAuthenticationUsernameTextField;
+@property UITextField *ntlAuthenticationPasswordTextField;
 @end
 
 @implementation RNCWebView
@@ -686,6 +688,18 @@ static NSDictionary* customCertificatesForHost;
         completionHandler(NSURLSessionAuthChallengeUseCredential, clientAuthenticationCredential);
         return;
     }
+    if ([[challenge protectionSpace] authenticationMethod] == NSURLAuthenticationMethodNTLM && [challenge previousFailureCount] < 3) {
+      [self handleNTLAuthenticationChallenge:completionHandler];
+      return;
+    } else if ([[challenge protectionSpace] authenticationMethod] == NSURLAuthenticationMethodNTLM && [challenge previousFailureCount] >= 3) {
+      UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Authentication Failed" message:@"You have exceeded the maximum authentication attempts." preferredStyle: UIAlertControllerStyleAlert];
+      [alert addAction:[UIAlertAction actionWithTitle:@"Okay" style:UIAlertActionStyleDefault handler:nil]];
+      
+      [[self topViewController] presentViewController:alert animated:YES completion:^(){
+          [_webView loadHTMLString:@"<h1>Authentication Failed</h1>" baseURL:[NSURL URLWithString:@"about:blank"]];
+      }];
+    }
+    
     if ([[challenge protectionSpace] serverTrust] != nil && customCertificatesForHost != nil && host != nil) {
         SecCertificateRef localCertificate = (__bridge SecCertificateRef)([customCertificatesForHost objectForKey:host]);
         if (localCertificate != nil) {
@@ -708,6 +722,31 @@ static NSDictionary* customCertificatesForHost;
         }
     }
     completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, nil);
+}
+
+- (void)handleNTLAuthenticationChallenge:(void (^)(NSURLSessionAuthChallengeDisposition disposition, NSURLCredential * _Nullable))completionHandler {
+  UIAlertController *authenticationAlert = [UIAlertController alertControllerWithTitle:@"Authenticaiton" message:@"" preferredStyle:UIAlertControllerStyleAlert];
+  
+  [authenticationAlert addTextFieldWithConfigurationHandler:^(UITextField * _Nonnull textField) {
+    textField.placeholder = @"Username";
+    self.ntlAuthenticationUsernameTextField = textField;
+  }];
+  [authenticationAlert addTextFieldWithConfigurationHandler:^(UITextField * _Nonnull textField) {
+    textField.placeholder = @"Password";
+    textField.secureTextEntry = YES;
+    self.ntlAuthenticationPasswordTextField = textField;
+  }];
+  [authenticationAlert addAction:[UIAlertAction actionWithTitle:@"Authenticate" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
+    if (self.ntlAuthenticationUsernameTextField.text != nil && self.ntlAuthenticationPasswordTextField.text != nil) {
+      completionHandler(NSURLSessionAuthChallengeUseCredential, [NSURLCredential credentialWithUser:self.ntlAuthenticationUsernameTextField.text password:self.ntlAuthenticationPasswordTextField.text persistence:NSURLCredentialPersistenceForSession]);
+    }
+  }]];
+  [authenticationAlert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:^(UIAlertAction * _Nonnull action) {
+    [_webView loadHTMLString:@"<h1>Authentication Canceled</h1>" baseURL:[NSURL URLWithString:@"about:blank"]];
+    completionHandler(NSURLSessionAuthChallengeRejectProtectionSpace, nil);
+  }]];
+  
+  [[self topViewController] presentViewController:authenticationAlert animated:YES completion:nil];
 }
 
 #pragma mark - WKNavigationDelegate methods
