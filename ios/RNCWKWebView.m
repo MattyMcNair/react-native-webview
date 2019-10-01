@@ -600,9 +600,16 @@ static NSURLCredential* clientAuthenticationCredential;
   didReceiveAuthenticationChallenge:(NSURLAuthenticationChallenge *)challenge
                   completionHandler:(void (^)(NSURLSessionAuthChallengeDisposition disposition, NSURLCredential * _Nullable))completionHandler
 {
-  if ([[challenge protectionSpace] authenticationMethod] == NSURLAuthenticationMethodNTLM && [challenge previousFailureCount] == 0) {
+  if ([[challenge protectionSpace] authenticationMethod] == NSURLAuthenticationMethodNTLM && [challenge previousFailureCount] < 3) {
     [self handleNTLAuthenticationChallenge:completionHandler];
     return;
+  } else if ([[challenge protectionSpace] authenticationMethod] == NSURLAuthenticationMethodNTLM && [challenge previousFailureCount] >= 3) {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Authentication Failed" message:@"You have exceeded the maximum authentication attempts." preferredStyle: UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Okay" style:UIAlertActionStyleDefault handler:nil]];
+    
+    [[self topViewController] presentViewController:alert animated:YES completion:^(){
+      [_webView loadHTMLString:@"<h1>Authentication Failed</h1>" baseURL:[NSURL URLWithString:@"about:blank"]];
+    }];
   }
   
   if (!clientAuthenticationCredential) {
@@ -635,6 +642,7 @@ static NSURLCredential* clientAuthenticationCredential;
     }
   }]];
   [authenticationAlert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:^(UIAlertAction * _Nonnull action) {
+    [_webView loadHTMLString:@"<h1>Authentication Canceled</h1>" baseURL:[NSURL URLWithString:@"about:blank"]];
     completionHandler(NSURLSessionAuthChallengeRejectProtectionSpace, nil);
   }]];
   

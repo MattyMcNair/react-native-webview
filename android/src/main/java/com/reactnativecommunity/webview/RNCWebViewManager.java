@@ -2,9 +2,11 @@ package com.reactnativecommunity.webview;
 
 import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
+import android.app.AlertDialog;
 import android.app.Dialog;
 import android.app.DownloadManager;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.Color;
@@ -598,6 +600,8 @@ public class RNCWebViewManager extends SimpleViewManager<WebView> {
     protected boolean mLastLoadFailed = false;
     protected @Nullable
     ReadableArray mUrlPrefixesForDefaultIntent;
+    private static int attemptCount = 0;
+
 
     @Override
     public void onPageFinished(WebView webView, String url) {
@@ -644,12 +648,30 @@ public class RNCWebViewManager extends SimpleViewManager<WebView> {
 
     @Override
     public void onReceivedHttpAuthRequest(WebView view, HttpAuthHandler handler, String host, String realm) {
-      Dialog dialog = new Dialog(view.getContext());
+      Dialog dialog;
       EditText usernameEditText;
       EditText passwordEditText;
       Button authenticateButton;
       Button cancelButton;
 
+      if (RNCWebViewClient.attemptCount >= 3) {
+        new AlertDialog.Builder(view.getContext())
+          .setTitle("Authentication Failed")
+          .setMessage("You have exceeded the maximum authentication attempts.")
+          .setPositiveButton(android.R.string.yes, new DialogInterface.OnClickListener() {
+            public void onClick(DialogInterface dialog, int which) {
+              RNCWebViewClient.attemptCount = 0;
+            }
+          })
+          .show();
+        handler.cancel();
+        view.loadDataWithBaseURL("", "<h1>Authentication Failed</h1>", HTML_MIME_TYPE, HTML_ENCODING, null);
+        return;
+      }
+
+      dialog = new Dialog(view.getContext());
+
+      RNCWebViewClient.attemptCount = RNCWebViewClient.attemptCount + 1;
       dialog.setContentView(R.layout.username_password_dialog_input);
       usernameEditText = dialog.findViewById(R.id.username_password_dialog_username_input);
       passwordEditText = dialog.findViewById(R.id.username_password_dialog_password_input);
@@ -665,7 +687,10 @@ public class RNCWebViewManager extends SimpleViewManager<WebView> {
       });
       cancelButton.setOnClickListener(new View.OnClickListener() {
         @Override
-        public void onClick(View view) {
+        public void onClick(View button) {
+          RNCWebViewClient.attemptCount = 0;
+          view.loadDataWithBaseURL("", "<h1>Authentication Canceled</h1>", HTML_MIME_TYPE, HTML_ENCODING, null);
+          handler.cancel();
           dialog.dismiss();
         }
       });
